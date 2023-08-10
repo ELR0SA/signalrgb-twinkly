@@ -388,7 +388,8 @@ class TwinklyProtocol {
 			"TWB200STP" : "Spritzer",
 			"TWQ064STW" : "Squares",
 			"TWS100SPP" : "Strings",
-			"TWS250STP" : "Strings"
+			"TWS250STP" : "Strings",
+			"TWS600STP" : "Strings"
 		};
 
 		this.deviceImageLibrary = {
