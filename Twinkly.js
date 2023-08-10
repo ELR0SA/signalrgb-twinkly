@@ -40,9 +40,10 @@ export function Initialize() {
 	Twinkly.setLEDMode("rt");
 	Twinkly.decodeAuthToken();
 	Twinkly.fetchDeviceLayoutType();
+	device.log("Device Initialized.");
 }
 
-export function Render() { //TODO: Add an IPCache Purge Button.
+export function Render() {
 	checkConnectionStatus();
 	sendColors();
 }
