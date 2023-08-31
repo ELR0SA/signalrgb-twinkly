@@ -44,8 +44,8 @@ export function Initialize() {
 }
 
 export function Render() {
-	checkConnectionStatus();
-	sendColors();
+	//checkConnectionStatus();
+	//sendColors();
 }
 
 export function Shutdown(suspend) {
@@ -247,6 +247,8 @@ export function DiscoveryService() {
 							if(JSON.parse(xhr.response).code === 1000) {
 								service.log(`Device Name: ${deviceInformationPacket.device_name}`);
 								service.log(`Device Mac Address: ${deviceInformationPacket.mac}`);
+								service.log(`Full Gestalt Packet Return Keys: ${Object.keys(deviceInformationPacket)}`);
+								service.log(`Full Gestalt Packet Return Values: ${Object.values(deviceInformationPacket)}`);
 								bytesPerLED = deviceInformationPacket.bytes_per_led;
 								service.log(`Number of Bytes Per LED: ${bytesPerLED}`);
 
@@ -256,7 +258,7 @@ export function DiscoveryService() {
 						}
 					}, false);
 
-					if(bytesPerLED > 2) {
+					if(bytesPerLED > 2 || bytesPerLED === undefined) { //Temp fix for devices that are V1.
 						service.log("Device has 3 or more Bytes Per LED. Adding Controller.");
 						this.activeDevices.push(value.ip);
 						this.CreateControllerDevice(value);
