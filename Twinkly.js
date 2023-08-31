@@ -44,8 +44,8 @@ export function Initialize() {
 }
 
 export function Render() {
-	//checkConnectionStatus();
-	//sendColors();
+	checkConnectionStatus();
+	sendColors();
 }
 
 export function Shutdown(suspend) {
@@ -87,14 +87,24 @@ function checkConnectionStatus() {
 function sendColors(shutdown = false) {
 	const RGBData = grabColors(shutdown);
 
-	let packetIDX = 0;
+	
+	if(Twinkly.getFirmwareFamily() === "F" || Twinkly.getFirmwareFamily() === "G") {
+		if(Twinkly.getFirmwareVersion === "2.2.1" || Twinkly.getFirmwareVersion === "2.2.2" || Twinkly.getFirmwareVersion === "2.4.2" || Twinkly.getFirmwareVersion === "2.4.6") {
+			Twinkly.sendGen2RTFrame(Twinkly.getNumberOfLEDs(), RGBData);
+		} else {
+			let packetIDX = 0;
 
-	while(RGBData.length > 900) {
-		Twinkly.sendGen3RTFrame(packetIDX, RGBData.splice(0, 900));
-		packetIDX++;
+			while(RGBData.length > 900) {
+				Twinkly.sendGen3RTFrame(packetIDX, RGBData.splice(0, 900));
+				packetIDX++;
+			}
+		
+			Twinkly.sendGen3RTFrame(packetIDX, RGBData);
+		}
+
+	} else { //Gen 1 Devices
+		Twinkly.sendGen1RTFrame(Twinkly.getNumberOfLEDs(), RGBData);
 	}
-
-	Twinkly.sendGen3RTFrame(packetIDX, RGBData);
 }
 
 function grabColors(shutdown) {
@@ -247,8 +257,6 @@ export function DiscoveryService() {
 							if(JSON.parse(xhr.response).code === 1000) {
 								service.log(`Device Name: ${deviceInformationPacket.device_name}`);
 								service.log(`Device Mac Address: ${deviceInformationPacket.mac}`);
-								service.log(`Full Gestalt Packet Return Keys: ${Object.keys(deviceInformationPacket)}`);
-								service.log(`Full Gestalt Packet Return Values: ${Object.values(deviceInformationPacket)}`);
 								bytesPerLED = deviceInformationPacket.bytes_per_led;
 								service.log(`Number of Bytes Per LED: ${bytesPerLED}`);
 
@@ -258,7 +266,7 @@ export function DiscoveryService() {
 						}
 					}, false);
 
-					if(bytesPerLED > 2 || bytesPerLED === undefined) { //Temp fix for devices that are V1.
+					if(bytesPerLED > 2 || bytesPerLED === undefined && deviceInformationPacket.hardware_version < 100) { // fix for devices that are V1.
 						service.log("Device has 3 or more Bytes Per LED. Adding Controller.");
 						this.activeDevices.push(value.ip);
 						this.CreateControllerDevice(value);
@@ -357,6 +365,7 @@ class TwinklyProtocol {
 
 		this.config = {
 			firmwareVersion : "",
+			firmwareFamily : "",
 			hardwareRevision: "",
 			previousDeviceBrightness : -1,
 			numberOfDeviceLEDs : -1,
@@ -421,6 +430,9 @@ class TwinklyProtocol {
 
 	getFirmwareVersion() { return this.config.firmwareVersion; }
 	setFirmwareVersion(firmwareVersion) { this.config.firmwareVersion = firmwareVersion; }
+
+	getFirmwareFamily() { return this.config.firmwareFamily; }
+	setFirmwareFamily(firmwareFamily) { this.config.firmwareFamily = firmwareFamily; }
 
 	getHardwareRevision() { return this.config.hardwareRevision; }
 	setHardwareRevision(hardwareRevision) { this.config.hardwareRevision = hardwareRevision; }
@@ -549,6 +561,7 @@ class TwinklyProtocol {
 				const deviceInformationPacket = JSON.parse(xhr.response);
 				//device.log(`Device Information Packet: ${Object.keys(deviceInformationPacket)}`);
 				device.log(`Device Product Name: ${deviceInformationPacket.product_name}`);
+				device.log(`Device Firmware Family: ${deviceInformationPacket.fw_family}`);
 				device.log(`Device Hardware Version: ${deviceInformationPacket.hardware_version}`);
 				device.log(`Device Bytes Per LED: ${deviceInformationPacket.bytes_per_led}`);
 				device.log(`Device Hardware ID: ${deviceInformationPacket.hw_id}`);
@@ -559,6 +572,7 @@ class TwinklyProtocol {
 				this.setNumberOfBytesPerLED(deviceInformationPacket.bytes_per_led);
 				this.setNumberOfLEDs(deviceInformationPacket.number_of_led);
 				this.setHardwareRevision(deviceInformationPacket.hardware_version);
+				this.setFirmwareFamily(deviceInformationPacket.fw_family);
 				device.setName(deviceInformationPacket.device_name);
 				this.setImageFromSKU(deviceInformationPacket.product_code);
 			}
