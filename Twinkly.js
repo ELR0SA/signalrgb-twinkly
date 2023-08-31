@@ -39,6 +39,7 @@ export function Initialize() {
 	Twinkly.setDeviceBrightness("enabled", "A", 100);
 	Twinkly.setLEDMode("rt");
 	Twinkly.decodeAuthToken();
+	Twinkly.fetchLEDConfig();
 	Twinkly.fetchDeviceLayoutType();
 	device.log("Device Initialized.");
 }
@@ -577,6 +578,18 @@ class TwinklyProtocol {
 				this.setFirmwareFamily(deviceInformationPacket.fw_family);
 				device.setName(deviceInformationPacket.device_name);
 				this.setImageFromSKU(deviceInformationPacket.product_code);
+			}
+		});
+	}
+
+	fetchLEDConfig() {
+		XmlHttp.GetWithAuth(`http://${controller.ip}/xled/v1/led/config`, (xhr) => {
+			if(xhr.readyState === 4 && xhr.status === 200) {
+				const ledConfigPacket = JSON.parse(xhr.response);
+				device.log(`Device LED Config Packet Code: ${ledConfigPacket.code}`);
+
+				device.log(`Device LED Config Packet Keys: ${Object.keys(ledConfigPacket)}`);
+				device.log(`Device LED Config Packet Values: ${Object.values(ledConfigPacket)}`)
 			}
 		});
 	}
