@@ -588,8 +588,8 @@ class TwinklyProtocol {
 				const ledConfigPacket = JSON.parse(xhr.response);
 				device.log(`Device LED Config Packet Code: ${ledConfigPacket.code}`);
 
-				device.log(`Device LED Config Packet Keys: ${Object.keys(ledConfigPacket.strings)}`);
-				device.log(`Device LED Config Packet Values: ${Object.values(ledConfigPacket.strings)}`)
+				device.log(`Device LED Config Packet Keys: ${Object.keys(ledConfigPacket.strings[0])}`);
+				device.log(`Device LED Config Packet Values: ${Object.values(ledConfigPacket.strings[0])}`)
 			}
 		});
 	}
