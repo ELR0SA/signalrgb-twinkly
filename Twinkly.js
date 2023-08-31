@@ -240,6 +240,7 @@ export function DiscoveryService() {
 	this.confirmTwinklyDevice = function(value) {
 		const challengeInput = encode(Array.from({length: 32}, () => Math.floor(Math.random() * 32)));
 		let bytesPerLED = 0;
+		let hw_version = 0;
 		XmlHttp.Post(`http://${value.ip}/xled/v1/login`, (xhr) => {
 			if(xhr.readyState === 4 && xhr.status === 200) {
 				const deviceLoginPacket = JSON.parse(xhr.response);
@@ -260,13 +261,14 @@ export function DiscoveryService() {
 								bytesPerLED = deviceInformationPacket.bytes_per_led;
 								service.log(`Number of Bytes Per LED: ${bytesPerLED}`);
 
+								hw_version = deviceInformationPacket.hardware_version;
 								value.id = deviceInformationPacket.mac;
 								value.name = deviceInformationPacket.device_name; //this is pretty slick. We grab the name in case a user decides that they want to change it, and if somehow two different ones flip ip's we're chilling.
 							}
 						}
 					}, false);
 
-					if(bytesPerLED > 2 || bytesPerLED === undefined && deviceInformationPacket.hardware_version < 100) { // fix for devices that are V1.
+					if(bytesPerLED > 2 || bytesPerLED === undefined && hw_version < 100) { // fix for devices that are V1.
 						service.log("Device has 3 or more Bytes Per LED. Adding Controller.");
 						this.activeDevices.push(value.ip);
 						this.CreateControllerDevice(value);
