@@ -28,6 +28,31 @@ export function ControllableParameters() {
 	];
 }
 
+
+
+function setupSubdevices(){
+	const numberOfSubdevicesToSpawn = Math.ceil(Twinkly.getNumberOfLEDs()/50);
+	const deviceLEDCount = Twinkly.getNumberOfLEDs();
+
+	for(let subdevices = 0; subdevices < numberOfSubdevicesToSpawn; subdevices++) {
+		const subdeviceLEDPositions = [];
+		const subdeviceLEDNames = [];
+
+		for(let deviceLEDs = 0; deviceLEDs < Math.min(deviceLEDCount, 50); deviceLEDs++) {
+			subdeviceLEDNames.push(`LED ${ledsGenerated + 1}`);
+			subdeviceLEDPositions.push([ ledsGenerated, 0 ]);
+		}
+		
+		device.createSubdevice(subdevices);
+		device.setSubdeviceName(subdevices, `Twinkly Section ${subdevices + 1}`);
+		//TODO: Attach image url to device library
+		//device.setSubdeviceImage(subdevice.name, Image()); //can't wait to have a dict for these
+		device.setSubdeviceSize(subdevices, math.min(deviceLEDCount, 50), 1);
+		device.setSubdeviceLeds(subdevices, subdevice.ledNames, subdevice.ledPositions);
+		deviceLEDCount = deviceLEDCount - 50;
+	}
+}
+
 export function Initialize() {
 	device.addFeature("udp");
 	device.addFeature("base64");
@@ -39,14 +64,14 @@ export function Initialize() {
 	Twinkly.setDeviceBrightness("enabled", "A", 100);
 	Twinkly.setLEDMode("rt");
 	Twinkly.decodeAuthToken();
-	Twinkly.fetchLEDConfig();
-	Twinkly.fetchDeviceLayoutType();
+	//Twinkly.fetchDeviceLayoutType();
+	setupSubdevices();
 	device.log("Device Initialized.");
 }
 
 export function Render() {
 	checkConnectionStatus();
-	sendColors();
+	//sendColors();
 }
 
 export function Shutdown(suspend) {
@@ -578,18 +603,6 @@ class TwinklyProtocol {
 				this.setFirmwareFamily(deviceInformationPacket.fw_family);
 				device.setName(deviceInformationPacket.device_name);
 				this.setImageFromSKU(deviceInformationPacket.product_code);
-			}
-		});
-	}
-
-	fetchLEDConfig() {
-		XmlHttp.GetWithAuth(`http://${controller.ip}/xled/v1/led/config`, (xhr) => {
-			if(xhr.readyState === 4 && xhr.status === 200) {
-				const ledConfigPacket = JSON.parse(xhr.response);
-				device.log(`Device LED Config Packet Code: ${ledConfigPacket.code}`);
-
-				device.log(`Device LED Config Packet Keys: ${Object.keys(ledConfigPacket.strings[0])}`);
-				device.log(`Device LED Config Packet Values: ${Object.values(ledConfigPacket.strings[0])}`)
 			}
 		});
 	}
