@@ -28,31 +28,6 @@ export function ControllableParameters() {
 	];
 }
 
-
-
-function setupSubdevices(){
-	const numberOfSubdevicesToSpawn = Math.ceil(Twinkly.getNumberOfLEDs()/50);
-	const deviceLEDCount = Twinkly.getNumberOfLEDs();
-
-	for(let subdevices = 0; subdevices < numberOfSubdevicesToSpawn; subdevices++) {
-		const subdeviceLEDPositions = [];
-		const subdeviceLEDNames = [];
-
-		for(let deviceLEDs = 0; deviceLEDs < Math.min(deviceLEDCount, 50); deviceLEDs++) {
-			subdeviceLEDNames.push(`LED ${ledsGenerated + 1}`);
-			subdeviceLEDPositions.push([ ledsGenerated, 0 ]);
-		}
-		
-		device.createSubdevice(subdevices);
-		device.setSubdeviceName(subdevices, `Twinkly Section ${subdevices + 1}`);
-		//TODO: Attach image url to device library
-		//device.setSubdeviceImage(subdevice.name, Image()); //can't wait to have a dict for these
-		device.setSubdeviceSize(subdevices, math.min(deviceLEDCount, 50), 1);
-		device.setSubdeviceLeds(subdevices, subdevice.ledNames, subdevice.ledPositions);
-		deviceLEDCount = deviceLEDCount - 50;
-	}
-}
-
 export function Initialize() {
 	device.addFeature("udp");
 	device.addFeature("base64");
@@ -64,14 +39,16 @@ export function Initialize() {
 	Twinkly.setDeviceBrightness("enabled", "A", 100);
 	Twinkly.setLEDMode("rt");
 	Twinkly.decodeAuthToken();
-	//Twinkly.fetchDeviceLayoutType();
-	setupSubdevices();
+	if(Twinkly.getFirmwareFamily() === "F" || Twinkly.getFirmwareFamily() === "G" || Twinkly.getFirmwareFamily() === "T") {
+		Twinkly.fetchDeviceLayoutType(); 
+	} else { setupSubdevices(); }
+	
 	device.log("Device Initialized.");
 }
 
 export function Render() {
 	checkConnectionStatus();
-	//sendColors();
+	sendColors();
 }
 
 export function Shutdown(suspend) {
@@ -111,10 +88,8 @@ function checkConnectionStatus() {
 }
 
 function sendColors(shutdown = false) {
-	const RGBData = grabColors(shutdown);
-
-	
-	if(Twinkly.getFirmwareFamily() === "F" || Twinkly.getFirmwareFamily() === "G") {
+	if(Twinkly.getFirmwareFamily() === "F" || Twinkly.getFirmwareFamily() === "G" || Twinkly.getFirmwareFamily() === "T") {
+		const RGBData = grabColors(shutdown);
 		if(Twinkly.getFirmwareVersion === "2.2.1" || Twinkly.getFirmwareVersion === "2.2.2" || Twinkly.getFirmwareVersion === "2.4.2" || Twinkly.getFirmwareVersion === "2.4.6") {
 			Twinkly.sendGen2RTFrame(Twinkly.getNumberOfLEDs(), RGBData);
 		} else {
@@ -129,8 +104,41 @@ function sendColors(shutdown = false) {
 		}
 
 	} else { //Gen 1 Devices
+		const RGBData = grabSubdeviceColors(shutdown);
 		Twinkly.sendGen1RTFrame(Twinkly.getNumberOfLEDs(), RGBData);
 	}
+}
+
+function grabSubdeviceColors(shutdown) 
+{
+	const RGBData = [];
+	const numberOfSubdevices = Math.ceil(Twinkly.getNumberOfLEDs()/50);
+	let deviceLEDCount = Twinkly.getNumberOfLEDs();
+
+	for(let subdevices = 0; subdevices < numberOfSubdevices; subdevices++) {
+		const sectionRGBData = []
+		const sectionLeds =  Math.min(deviceLEDCount, 50);
+		for(let iIdx = 0; iIdx < sectionLeds; iIdx++) {
+			let col;
+	
+			if(shutdown) {
+				col = hexToRgb(shutdownColor);
+			} else if (LightingMode === "Forced") {
+				col = hexToRgb(forcedColor);
+			} else {
+				col = device.subdeviceColor(subdevices, iIdx, 0);
+			}
+	
+			const iLedIdx = iIdx * 3;
+			sectionRGBData[iLedIdx] = col[0];
+			sectionRGBData[iLedIdx+1] = col[1];
+			sectionRGBData[iLedIdx+2] = col[2];
+		}
+		deviceLEDCount = deviceLEDCount - 50;
+		RGBData.push(...sectionRGBData);
+	}
+
+	return RGBData;
 }
 
 function grabColors(shutdown) {
@@ -167,6 +175,30 @@ function grabColors(shutdown) {
 	}
 
 	return RGBData;
+}
+
+function setupSubdevices(){
+	const numberOfSubdevicesToSpawn = Math.ceil(Twinkly.getNumberOfLEDs()/50);
+	let deviceLEDCount = Twinkly.getNumberOfLEDs();
+
+	for(let subdevices = 0; subdevices < numberOfSubdevicesToSpawn; subdevices++) {
+		const subdeviceLEDPositions = [];
+		const subdeviceLEDNames = [];
+		const sectionLeds = Math.min(deviceLEDCount, 50)
+
+		for(let deviceLEDs = 0; deviceLEDs < sectionLeds; deviceLEDs++) {
+			subdeviceLEDNames.push(`LED ${deviceLEDs + 1}`);
+			subdeviceLEDPositions.push([ deviceLEDs, 0 ]);
+		}
+		
+		device.createSubdevice(subdevices);
+		device.setSubdeviceName(subdevices, `Twinkly Section ${subdevices + 1}`);
+		//TODO: Attach image url to device library
+		//device.setSubdeviceImage(subdevice.name, Image()); //can't wait to have a dict for these
+		device.setSubdeviceSize(subdevices, Math.min(deviceLEDCount, 50), 1);
+		device.setSubdeviceLeds(subdevices, subdeviceLEDNames, subdeviceLEDPositions);
+		deviceLEDCount = deviceLEDCount - 50;
+	}
 }
 
 function hexToRgb(hex) {
