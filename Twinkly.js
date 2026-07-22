@@ -1,7 +1,7 @@
 import {encode, decode} from "@SignalRGB/base64";
 
 export function Name() { return "Twinkly"; }
-export function Version() { return "1.0.0"; }
+export function Version() { return "1.1.0"; }
 export function Type() { return "network"; }
 export function Publisher() { return "WhirlwindFX"; }
 export function Size() { return [48, 48]; }
@@ -14,6 +14,7 @@ shutdownColor:readonly
 LightingMode:readonly
 forcedColor:readonly
 autoReconnect:readonly
+maxFrameRate:readonly
 xScale:readonly
 yScale:readonly
 */
@@ -22,7 +23,8 @@ export function ControllableParameters() {
 		{"property":"shutdownColor", "group":"lighting", "label":"Shutdown Color", "min":"0", "max":"360", "type":"color", "default":"#009bde"},
 		{"property":"LightingMode", "group":"lighting", "label":"Lighting Mode", "type":"combobox", "values":["Canvas", "Forced"], "default":"Canvas"},
 		{"property":"forcedColor", "group":"lighting", "label":"Forced Color", "min":"0", "max":"360", "type":"color", "default":"#009bde"},
-		{"property":"autoReconnect", "group":"", "label":"Auto Reconnect to Devices When Lost", "type":"boolean", "default": "false"},
+		{"property":"autoReconnect", "group":"", "label":"Auto Reconnect to Devices When Lost", "type":"boolean", "default": true},
+		{"property":"maxFrameRate", "group":"", "label":"Maximum Frame Rate", "type":"number", "min":"10", "max":"40", "step":"1", "default":"40"},
 		{"property": "xScale", "group": "", "label": "Width Scale", "step": "1", "type": "number", "min": "1", "max": "10", "default": "5"},
 		{"property": "yScale", "group": "", "label": "Height Scale", "step": "1", "type": "number", "min": "1", "max": "10", "default": "5"},
 	];
@@ -39,16 +41,21 @@ export function Initialize() {
 	Twinkly.setDeviceBrightness("enabled", "A", 100);
 	Twinkly.setLEDMode("rt");
 	Twinkly.decodeAuthToken();
-	if(Twinkly.getFirmwareFamily() === "F" || Twinkly.getFirmwareFamily() === "G" || Twinkly.getFirmwareFamily() === "T") {
-		Twinkly.fetchDeviceLayoutType(); 
-	} else { setupSubdevices(); }
+	Twinkly.fetchDeviceLayoutType();
 	
 	device.log("Device Initialized.");
 }
 
 export function Render() {
 	checkConnectionStatus();
+
+	const frameInterval = 1000 / Math.max(10, Number(maxFrameRate) || 40);
+	if(Date.now() - savedFrameTimer < frameInterval) {
+		return;
+	}
+
 	sendColors();
+	savedFrameTimer = Date.now();
 }
 
 export function Shutdown(suspend) {
@@ -63,34 +70,43 @@ export function onyScaleChanged() {
 }
 
 let savedConnectionCheckTimer = Date.now();
-const connectionCheckTimeout = 60000;
+let savedFrameTimer = 0;
+const connectionCheckTimeout = 30000;
+const proactiveSessionRenewalTimeout = 3.5 * 60 * 60 * 1000;
 
 function checkConnectionStatus() {
 	if(Date.now() - savedConnectionCheckTimer < connectionCheckTimeout) {
 		return;
 	}
-	const validToken = Twinkly.fetchLEDMode(true);
+	savedConnectionCheckTimer = Date.now();
 
-	if(validToken !== "Ok") {
-		device.log(`Token: ${Twinkly.getAuthenticationToken()} invalidated.`);
-
-		if(autoReconnect) {
-			device.log("Attempting to fetch new authentication token and steal control back.");
-			Twinkly.deviceLogin();
-			Twinkly.verifyToken(Twinkly.getAuthenticationToken(), Twinkly.getChallengeResponse());
-			Twinkly.setLEDMode("rt");
-			Twinkly.decodeAuthToken();
-			Twinkly.fetchDeviceLayoutType();
-		}
+	if(Twinkly.isSessionRefreshInProgress()) {
+		return;
 	}
 
-	savedConnectionCheckTimer = Date.now();
+	if(autoReconnect && Date.now() - Twinkly.getLastAuthenticationTime() >= proactiveSessionRenewalTimeout) {
+		device.log("Refreshing the Twinkly session before its authentication token expires.");
+		Twinkly.renewSession();
+		return;
+	}
+
+	Twinkly.fetchLEDModeAsync((validToken) => {
+		if(validToken === "Ok") {
+			return;
+		}
+
+		device.log(`Twinkly connection health check failed: ${validToken}.`);
+		if(autoReconnect) {
+			device.log("Attempting to authenticate again and restore real-time mode.");
+			Twinkly.renewSession();
+		}
+	});
 }
 
 function sendColors(shutdown = false) {
-	if(Twinkly.getFirmwareFamily() === "F" || Twinkly.getFirmwareFamily() === "G" || Twinkly.getFirmwareFamily() === "T") {
+	if(!Twinkly.usesLegacyRealtimeProtocol()) {
 		const RGBData = grabColors(shutdown);
-		if(Twinkly.getFirmwareVersion === "2.2.1" || Twinkly.getFirmwareVersion === "2.2.2" || Twinkly.getFirmwareVersion === "2.4.2" || Twinkly.getFirmwareVersion === "2.4.6") {
+		if(Twinkly.usesGen2RealtimeProtocol()) {
 			Twinkly.sendGen2RTFrame(Twinkly.getNumberOfLEDs(), RGBData);
 		} else {
 			let packetIDX = 0;
@@ -409,6 +425,8 @@ class TwinklyProtocol {
 	constructor() {
 		this.authentication_token = "";
 		this.challenge_response = "";
+		this.lastAuthenticationTime = 0;
+		this.sessionRefreshInProgress = false;
 
 		this.statusCodes = {
 			1000 : "Ok",
@@ -447,6 +465,7 @@ class TwinklyProtocol {
 			"TWD400STP" : "Dots",
 			"TWF020STP" : "Festoon",
 			"TWFL200STW" : "Flex",
+			"TWFL300STW" : "Flex",
 			"TWI190SPP" : "Icicle",
 			"TWWT050SPP" : "Light Tree", //2D
 			"TWP300SPP" : "Light Tree",
@@ -509,11 +528,27 @@ class TwinklyProtocol {
 	getChallengeResponse() { return this.challenge_response; }
 	setChallengeResponse(challenge_response) {this.challenge_response = challenge_response; }
 
+	getLastAuthenticationTime() { return this.lastAuthenticationTime; }
+	isSessionRefreshInProgress() { return this.sessionRefreshInProgress; }
+
 	getNumberOfLEDs() { return this.config.numberOfDeviceLEDs; }
 	setNumberOfLEDs(numberOfDeviceLEDs) { this.config.numberOfDeviceLEDs = numberOfDeviceLEDs; }
 
 	getNumberOfBytesPerLED() { return this.config.bytesPerLED; }
 	setNumberOfBytesPerLED(bytesPerLED) { this.config.bytesPerLED = bytesPerLED; }
+
+	usesLegacyRealtimeProtocol() {
+		return Number(this.getHardwareRevision()) < 100;
+	}
+
+	usesGen2RealtimeProtocol() {
+		const version = this.getFirmwareVersion().split(".").map(Number);
+		if(version.length < 3 || version.some((part) => Number.isNaN(part))) {
+			return false;
+		}
+
+		return version[0] < 2 || version[0] === 2 && (version[1] < 4 || version[1] === 4 && version[2] <= 6);
+	}
 
 	setImageFromSKU(SKU) {
 		const deviceType = this.deviceSKULibrary[SKU];
@@ -597,6 +632,31 @@ class TwinklyProtocol {
 		return packetStatus;
 	}
 
+	fetchLEDModeAsync(callback) {
+		XmlHttp.GetWithAuth(`http://${controller.ip}/xled/v1/led/mode`, (xhr) => {
+			if(xhr.readyState !== 4) {
+				return;
+			}
+
+			if(xhr.status !== 200) {
+				callback(`HTTP ${xhr.status || "unreachable"}`);
+				return;
+			}
+
+			try {
+				const packet = JSON.parse(xhr.response);
+				if(packet.code !== 1000) {
+					callback(this.statusCodes[packet.code] || `Code ${packet.code}`);
+					return;
+				}
+
+				callback(packet.mode === "rt" ? "Ok" : `Incorrect Mode: ${packet.mode}`);
+			} catch(e) {
+				callback(`Invalid response: ${e}`);
+			}
+		}, this.getAuthenticationToken(), true);
+	}
+
 	setLEDMode(LEDMode = "color") {
 		XmlHttp.PostWithAuth(`http://${controller.ip}/xled/v1/led/mode`, (xhr) => {
 			if(xhr.readyState === 4 && xhr.status === 200) {
@@ -661,7 +721,7 @@ class TwinklyProtocol {
 				} else if(deviceLayoutPacket.source === "2d") {
 					for(const coordinate in deviceLayoutPacket.coordinates) {
 						const XCoordinate = deviceLayoutPacket.coordinates[coordinate].x;
-						const YCoordinate = deviceLayoutPacket.coordinates[coordinate].z;
+						const YCoordinate = deviceLayoutPacket.coordinates[coordinate].y;
 						xRoundingArray.push(XCoordinate);
 						yRoundingArray.push(YCoordinate);
 					}
@@ -722,9 +782,99 @@ class TwinklyProtocol {
 	verifyToken(token, challenge_response) {
 		XmlHttp.PostWithAuth(`http://${controller.ip}/xled/v1/verify`, (xhr) => {
 			if(xhr.readyState === 4 && xhr.status === 200) {
-				device.log(`Token Verification Response Code: ${this.statusCodes[JSON.parse(xhr.response).code]}`);
+				const responseCode = JSON.parse(xhr.response).code;
+				device.log(`Token Verification Response Code: ${this.statusCodes[responseCode]}`);
+				if(responseCode === 1000) {
+					this.lastAuthenticationTime = Date.now();
+				}
 			}
 		}, {"challenge-response" : challenge_response}, token);
+	}
+
+	renewSession() {
+		if(this.sessionRefreshInProgress) {
+			return;
+		}
+
+		this.sessionRefreshInProgress = true;
+		const challengeInput = base64.Encode(Array.from({length: 32}, () => Math.floor(Math.random() * 32)));
+
+		XmlHttp.Post(`http://${controller.ip}/xled/v1/login`, (loginXhr) => {
+			if(loginXhr.readyState !== 4) {
+				return;
+			}
+
+			if(loginXhr.status !== 200) {
+				this.finishSessionRefresh(false, `login HTTP ${loginXhr.status || "unreachable"}`);
+				return;
+			}
+
+			let loginPacket;
+			try {
+				loginPacket = JSON.parse(loginXhr.response);
+			} catch(e) {
+				this.finishSessionRefresh(false, `invalid login response: ${e}`);
+				return;
+			}
+
+			const token = loginPacket.authentication_token;
+			const challengeResponse = loginPacket["challenge-response"];
+			if(loginPacket.code !== 1000 || !token || !challengeResponse) {
+				this.finishSessionRefresh(false, `login code ${loginPacket.code}`);
+				return;
+			}
+
+			XmlHttp.PostWithAuth(`http://${controller.ip}/xled/v1/verify`, (verifyXhr) => {
+				if(verifyXhr.readyState !== 4) {
+					return;
+				}
+
+				let verified = false;
+				if(verifyXhr.status === 200) {
+					try {
+						verified = JSON.parse(verifyXhr.response).code === 1000;
+					} catch(e) {
+						device.log(`Unable to parse token verification response: ${e}`);
+					}
+				}
+
+				if(!verified) {
+					this.finishSessionRefresh(false, `verification HTTP ${verifyXhr.status || "unreachable"}`);
+					return;
+				}
+
+				this.setAuthenticationToken(token);
+				this.setChallengeResponse(challengeResponse);
+				this.decodeAuthToken();
+				this.lastAuthenticationTime = Date.now();
+
+				XmlHttp.PostWithAuth(`http://${controller.ip}/xled/v1/led/mode`, (modeXhr) => {
+					if(modeXhr.readyState !== 4) {
+						return;
+					}
+
+					let restored = false;
+					if(modeXhr.status === 200) {
+						try {
+							restored = JSON.parse(modeXhr.response).code === 1000;
+						} catch(e) {
+							device.log(`Unable to parse mode response: ${e}`);
+						}
+					}
+
+					this.finishSessionRefresh(restored, `real-time mode HTTP ${modeXhr.status || "unreachable"}`);
+				}, {"mode" : "rt"}, token, true);
+			}, {"challenge-response" : challengeResponse}, token, true);
+		}, {"challenge" : challengeInput}, true);
+	}
+
+	finishSessionRefresh(success, detail) {
+		this.sessionRefreshInProgress = false;
+		if(success) {
+			device.log("Twinkly session refreshed and real-time mode restored.");
+		} else {
+			device.log(`Twinkly session refresh failed (${detail}). Will retry on the next health check.`);
+		}
 	}
 
 	sendGen1RTFrame(numberOfLEDs, RGBData) {
