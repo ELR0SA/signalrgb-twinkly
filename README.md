@@ -1,6 +1,6 @@
 # Twinkly
 
-[![Add To Installation](https://marketplace.signalrgb.com/resources/add-extension-256.png 'Add to My SignalRGB Installation')](signalrgb://addon/install?url=https://gitlab.com/signalrgb/Twinkly)
+[![Add To Installation](https://marketplace.signalrgb.com/resources/add-extension-256.png 'Add to My SignalRGB Installation')](signalrgb://addon/install?url=https://github.com/ELR0SA/signalrgb-twinkly)
 
 ## Getting started
 This fork is based on SignalRGB's `boX-Development` branch and focuses on stable
