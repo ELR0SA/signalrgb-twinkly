@@ -21,8 +21,8 @@ real-time canvas streaming for Twinkly Wi-Fi devices.
   rendering.
 - Caps output at the controllers' advertised maximum of 40 FPS.
 - Fixes 2D layout parsing and adds the TWFL300STW product image mapping.
-- Supports linear layouts such as TWFL300STW even when no 2D/3D map is
-  available.
+- Preserves the segmented SignalRGB layout used by firmware-family `S` devices
+  such as TWFL300STW while streaming them with the modern Gen 3 protocol.
 - Releases a stalled session refresh so automatic recovery can retry.
 
 ## Known Issues

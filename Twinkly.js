@@ -1,7 +1,7 @@
 import {encode, decode} from "@SignalRGB/base64";
 
 export function Name() { return "Twinkly"; }
-export function Version() { return "1.2.0"; }
+export function Version() { return "1.2.1"; }
 export function Type() { return "network"; }
 export function Publisher() { return "WhirlwindFX"; }
 export function Size() { return [48, 48]; }
@@ -41,7 +41,12 @@ export function Initialize() {
 	Twinkly.setDeviceBrightness("enabled", "A", 100);
 	Twinkly.setLEDMode("rt");
 	Twinkly.decodeAuthToken();
-	Twinkly.fetchDeviceLayoutType();
+	if(Twinkly.getFirmwareFamily() === "S") {
+		useSubdeviceLayout = true;
+		setupSubdevices();
+	} else {
+		Twinkly.fetchDeviceLayoutType();
+	}
 	
 	device.log("Device Initialized.");
 }
@@ -71,6 +76,7 @@ export function onyScaleChanged() {
 
 let savedConnectionCheckTimer = Date.now();
 let savedFrameTimer = 0;
+let useSubdeviceLayout = false;
 const connectionCheckTimeout = 30000;
 const proactiveSessionRenewalTimeout = 3.5 * 60 * 60 * 1000;
 const sessionRefreshTimeout = 15000;
@@ -108,7 +114,7 @@ function checkConnectionStatus() {
 
 function sendColors(shutdown = false) {
 	if(!Twinkly.usesLegacyRealtimeProtocol()) {
-		const RGBData = grabColors(shutdown);
+		const RGBData = useSubdeviceLayout ? grabSubdeviceColors(shutdown) : grabColors(shutdown);
 		if(Twinkly.usesGen2RealtimeProtocol()) {
 			Twinkly.sendGen2RTFrame(Twinkly.getNumberOfLEDs(), RGBData);
 		} else {
