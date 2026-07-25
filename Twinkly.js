@@ -1,7 +1,7 @@
 import {encode, decode} from "@SignalRGB/base64";
 
 export function Name() { return "Twinkly"; }
-export function Version() { return "1.1.0"; }
+export function Version() { return "1.2.0"; }
 export function Type() { return "network"; }
 export function Publisher() { return "WhirlwindFX"; }
 export function Size() { return [48, 48]; }
@@ -24,7 +24,7 @@ export function ControllableParameters() {
 		{"property":"LightingMode", "group":"lighting", "label":"Lighting Mode", "type":"combobox", "values":["Canvas", "Forced"], "default":"Canvas"},
 		{"property":"forcedColor", "group":"lighting", "label":"Forced Color", "min":"0", "max":"360", "type":"color", "default":"#009bde"},
 		{"property":"autoReconnect", "group":"", "label":"Auto Reconnect to Devices When Lost", "type":"boolean", "default": true},
-		{"property":"maxFrameRate", "group":"", "label":"Maximum Frame Rate", "type":"number", "min":"10", "max":"40", "step":"1", "default":"40"},
+		{"property":"maxFrameRate", "group":"", "label":"Maximum Frame Rate", "type":"number", "min":"10", "max":"40", "step":"1", "default":"30"},
 		{"property": "xScale", "group": "", "label": "Width Scale", "step": "1", "type": "number", "min": "1", "max": "10", "default": "5"},
 		{"property": "yScale", "group": "", "label": "Height Scale", "step": "1", "type": "number", "min": "1", "max": "10", "default": "5"},
 	];
@@ -49,7 +49,7 @@ export function Initialize() {
 export function Render() {
 	checkConnectionStatus();
 
-	const frameInterval = 1000 / Math.max(10, Number(maxFrameRate) || 40);
+	const frameInterval = 1000 / Math.max(10, Number(maxFrameRate) || 30);
 	if(Date.now() - savedFrameTimer < frameInterval) {
 		return;
 	}
@@ -73,6 +73,7 @@ let savedConnectionCheckTimer = Date.now();
 let savedFrameTimer = 0;
 const connectionCheckTimeout = 30000;
 const proactiveSessionRenewalTimeout = 3.5 * 60 * 60 * 1000;
+const sessionRefreshTimeout = 15000;
 
 function checkConnectionStatus() {
 	if(Date.now() - savedConnectionCheckTimer < connectionCheckTimeout) {
@@ -81,7 +82,9 @@ function checkConnectionStatus() {
 	savedConnectionCheckTimer = Date.now();
 
 	if(Twinkly.isSessionRefreshInProgress()) {
-		return;
+		if(!Twinkly.expireStaleSessionRefresh(sessionRefreshTimeout)) {
+			return;
+		}
 	}
 
 	if(autoReconnect && Date.now() - Twinkly.getLastAuthenticationTime() >= proactiveSessionRenewalTimeout) {
@@ -427,6 +430,7 @@ class TwinklyProtocol {
 		this.challenge_response = "";
 		this.lastAuthenticationTime = 0;
 		this.sessionRefreshInProgress = false;
+		this.sessionRefreshStartedAt = 0;
 
 		this.statusCodes = {
 			1000 : "Ok",
@@ -701,40 +705,67 @@ class TwinklyProtocol {
 
 	fetchDeviceLayoutType() {
 		XmlHttp.GetWithAuth(`http://${controller.ip}/xled/v1/led/layout/full`, (xhr) => {
-			if(xhr.readyState === 4 && xhr.status === 200) {
-				const deviceLayoutPacket = JSON.parse(xhr.response);
-				device.log(`Device Layout Packet Code: ${deviceLayoutPacket.code}`);
-
-				device.log(`Device Layout Source: ${deviceLayoutPacket.source}`);
-
-
-				const xRoundingArray = [];
-				const yRoundingArray = [];
-
-				if(deviceLayoutPacket.source === "3d") {
-					for(const coordinate in deviceLayoutPacket.coordinates) {
-						const XCoordinate = deviceLayoutPacket.coordinates[coordinate].x;
-						const YCoordinate = deviceLayoutPacket.coordinates[coordinate].z;
-						xRoundingArray.push(XCoordinate);
-						yRoundingArray.push(YCoordinate);
-					}
-				} else if(deviceLayoutPacket.source === "2d") {
-					for(const coordinate in deviceLayoutPacket.coordinates) {
-						const XCoordinate = deviceLayoutPacket.coordinates[coordinate].x;
-						const YCoordinate = deviceLayoutPacket.coordinates[coordinate].y;
-						xRoundingArray.push(XCoordinate);
-						yRoundingArray.push(YCoordinate);
-					}
-				}
-
-				device.log(`X Max: ${Math.max(...xRoundingArray)}`);
-				device.log(`X Min: ${Math.min(...xRoundingArray)}`);
-				device.log(`Y Max: ${Math.max(...yRoundingArray)}`);
-				device.log(`Y Min: ${Math.min(...yRoundingArray)}`);
-
-				this.configureDeviceLayout(deviceLayoutPacket, Math.max(...xRoundingArray), Math.max(...yRoundingArray));
+			if(xhr.readyState !== 4) {
+				return;
 			}
+
+			if(xhr.status !== 200) {
+				device.log(`Unable to fetch Twinkly layout (HTTP ${xhr.status || "unreachable"}). Using a linear layout.`);
+				this.configureLinearDeviceLayout();
+				return;
+			}
+
+			let deviceLayoutPacket;
+			try {
+				deviceLayoutPacket = JSON.parse(xhr.response);
+			} catch(e) {
+				device.log(`Unable to parse Twinkly layout: ${e}. Using a linear layout.`);
+				this.configureLinearDeviceLayout();
+				return;
+			}
+
+			device.log(`Device Layout Packet Code: ${deviceLayoutPacket.code}`);
+			device.log(`Device Layout Source: ${deviceLayoutPacket.source}`);
+
+			if((deviceLayoutPacket.source !== "2d" && deviceLayoutPacket.source !== "3d") ||
+				!Array.isArray(deviceLayoutPacket.coordinates) ||
+				deviceLayoutPacket.coordinates.length === 0) {
+				device.log(`Layout source "${deviceLayoutPacket.source}" is linear or has no mapped coordinates. Using LED order.`);
+				this.configureLinearDeviceLayout();
+				return;
+			}
+
+			const xRoundingArray = [];
+			const yRoundingArray = [];
+
+			for(const coordinate of deviceLayoutPacket.coordinates) {
+				xRoundingArray.push(coordinate.x);
+				yRoundingArray.push(deviceLayoutPacket.source === "3d" ? coordinate.z : coordinate.y);
+			}
+
+			device.log(`X Max: ${Math.max(...xRoundingArray)}`);
+			device.log(`X Min: ${Math.min(...xRoundingArray)}`);
+			device.log(`Y Max: ${Math.max(...yRoundingArray)}`);
+			device.log(`Y Min: ${Math.min(...yRoundingArray)}`);
+
+			this.configureDeviceLayout(deviceLayoutPacket, Math.max(...xRoundingArray), Math.max(...yRoundingArray));
 		});
+	}
+
+	configureLinearDeviceLayout() {
+		const numberOfLEDs = this.getNumberOfLEDs();
+		const vLedNames = [];
+		const vLedPositions = [];
+
+		for(let led = 0; led < numberOfLEDs; led++) {
+			vLedNames.push(`LED ${led + 1}`);
+			vLedPositions.push([led, 0]);
+		}
+
+		this.setvLedNames(vLedNames);
+		this.setvLedPositions(vLedPositions);
+		device.setSize([Math.max(numberOfLEDs, 1), 1]);
+		device.setControllableLeds(vLedNames, vLedPositions);
 	}
 
 	configureDeviceLayout(deviceLayoutPacket, xMax, yMax) {
@@ -797,6 +828,7 @@ class TwinklyProtocol {
 		}
 
 		this.sessionRefreshInProgress = true;
+		this.sessionRefreshStartedAt = Date.now();
 		const challengeInput = base64.Encode(Array.from({length: 32}, () => Math.floor(Math.random() * 32)));
 
 		XmlHttp.Post(`http://${controller.ip}/xled/v1/login`, (loginXhr) => {
@@ -870,11 +902,23 @@ class TwinklyProtocol {
 
 	finishSessionRefresh(success, detail) {
 		this.sessionRefreshInProgress = false;
+		this.sessionRefreshStartedAt = 0;
 		if(success) {
 			device.log("Twinkly session refreshed and real-time mode restored.");
 		} else {
 			device.log(`Twinkly session refresh failed (${detail}). Will retry on the next health check.`);
 		}
+	}
+
+	expireStaleSessionRefresh(timeout) {
+		if(!this.sessionRefreshInProgress || Date.now() - this.sessionRefreshStartedAt < timeout) {
+			return false;
+		}
+
+		this.sessionRefreshInProgress = false;
+		this.sessionRefreshStartedAt = 0;
+		device.log("Twinkly session refresh timed out. Allowing a new recovery attempt.");
+		return true;
 	}
 
 	sendGen1RTFrame(numberOfLEDs, RGBData) {

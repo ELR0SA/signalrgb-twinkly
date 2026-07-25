@@ -21,6 +21,9 @@ real-time canvas streaming for Twinkly Wi-Fi devices.
   rendering.
 - Caps output at the controllers' advertised maximum of 40 FPS.
 - Fixes 2D layout parsing and adds the TWFL300STW product image mapping.
+- Supports linear layouts such as TWFL300STW even when no 2D/3D map is
+  available.
+- Releases a stalled session refresh so automatic recovery can retry.
 
 ## Known Issues
 - No Support For First Generation Devices (Need Users with First Gen Devices)
@@ -32,7 +35,8 @@ real-time canvas streaming for Twinkly Wi-Fi devices.
    to open the custom plugins folder.
 2. Copy `Twinkly.js` from this repository into that folder.
 3. Restart SignalRGB so it reloads the addon.
-4. Leave **Auto Reconnect** enabled and start with **Maximum Frame Rate** at 40.
+4. Leave **Auto Reconnect** enabled and start with **Maximum Frame Rate** at 30.
+   Increase to 40 only after the connection remains stable.
 
 SignalRGB custom plugins override bundled plugins and persist across application
 updates. Remove the custom copy when you want to return to SignalRGB's bundled
